@@ -25,10 +25,29 @@ export async function POST(req: NextRequest) {
     );
   }
 
+  // Validate data types and lengths
+  if (typeof topics !== "string" || typeof participant !== "string") {
+    return NextResponse.json({ error: "Invalid data types" }, { status: 400 });
+  }
+
+  // Sanitize and validate input lengths
+  const sanitizedTopics = topics.trim().slice(0, 500);
+  const sanitizedParticipant = participant.trim().slice(0, 100);
+
+  if (sanitizedTopics.length === 0 || sanitizedParticipant.length === 0) {
+    return NextResponse.json(
+      { error: "Empty or invalid input" },
+      { status: 400 }
+    );
+  }
+
   console.log("Request body:", { topics, participant });
   console.log("Env key present:", !!process.env.OPENAI_API_KEY);
 
   try {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 10000);
+
     const openAIRes = await fetch(
       "https://api.openai.com/v1/chat/completions",
       {
@@ -43,20 +62,23 @@ export async function POST(req: NextRequest) {
             { role: "system", content: "You're an AI icebreaker generator." },
             {
               role: "user",
-              content: `Generate a fun, thought-provoking icebreaker question for a group game. The question should be addressed to ${participant} and relate to the following topics: ${
-                topics || "any topic"
-              }.`,
+              content: `Generate a fun, thought-provoking icebreaker question for a group game. The question should be addressed to ${sanitizedParticipant} and relate to the following topics: ${sanitizedTopics}.`,
             },
           ],
         }),
+        signal: controller.signal,
       }
     );
 
+    clearTimeout(timeoutId);
     const data = await openAIRes.json();
     const message = data?.choices?.[0]?.message?.content?.trim();
 
     return NextResponse.json({ question: message });
-  } catch (err) {
+  } catch (err: unknown) {
+    if (err instanceof Error && err.name === "AbortError") {
+      return NextResponse.json({ error: "Request timeout" }, { status: 408 });
+    }
     return NextResponse.json(
       { error: "OpenAI request failed" },
       { status: 500 }
