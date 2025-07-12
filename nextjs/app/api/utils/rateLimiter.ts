@@ -6,12 +6,21 @@ const redis = new Redis({
   token: process.env.UPSTASH_REDIS_REST_TOKEN!,
 });
 
-const ratelimit = new Ratelimit({
+const shortTermLimit = new Ratelimit({
   redis,
-  limiter: Ratelimit.fixedWindow(5, "1 m"),
+  limiter: Ratelimit.fixedWindow(5, "1 m"), // 5 requests per minute
+});
+
+const longTermLimit = new Ratelimit({
+  redis,
+  limiter: Ratelimit.fixedWindow(100, "1 h"), // 100 requests per hour
 });
 
 export const rateLimiter = async (identifier: string) => {
-  const { success } = await ratelimit.limit(identifier);
-  return success;
+  const [shortTerm, longTerm] = await Promise.all([
+    shortTermLimit.limit(identifier),
+    longTermLimit.limit(identifier),
+  ]);
+
+  return shortTerm.success && longTerm.success;
 };
